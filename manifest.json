@@ -1,6 +1,6 @@
 {
-  "name": "Purse",
-  "short_name": "Purse",
+  "name": "Finances",
+  "short_name": "Finances",
   "description": "My personal budget and money tracker",
   "start_url": "./",
   "scope": "./",
