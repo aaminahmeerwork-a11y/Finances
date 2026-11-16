@@ -458,7 +458,7 @@ function txSheet(id){
   openSheet(`<div class="row"><span class="dot" style="background:${(CAT[t.category]||CAT.none).c}33">${(CAT[t.category]||CAT.none).e}</span>
     <div class="grow"><b>${esc(t.desc)}</b><div class="small muted">${fmtDateLong(t.date)} · ${BANK[t.bank]?.name||esc(t.bank)}${t.ref?' · '+esc(t.ref):''}</div></div>
     <b class="amt num ${t.amount>0?'in':''}" style="font-size:18px">${t.amount>0?'+':'−'}${money(t.amount)}</b></div>
-    <label class="check"><input type="checkbox" id="always" checked> Always use this for “${esc(keyOf(t.desc))}”</label>
+    <label class="check"><input type="checkbox" id="always"> Also change every other transaction from “${esc(keyOf(t.desc))}”</label>
     <div class="grid3">${opts.map(c=>catBtn(t,c)).join('')}</div>${refunds}
     <button class="btn block ghost danger" onclick="delTx('${t.id}')">Delete this transaction</button>`);
 }
@@ -852,18 +852,18 @@ function readRows(rows,hi,d){
   previewSheet();
 }
 function buildPending(){
-  const have=new Set(S.tx.map(t=>t.hash)), seen={}, fresh=[]; let dup=0;
+  const byHash=new Map(S.tx.map(t=>[t.hash,t])), seen={}, fresh=[], fixes=[]; let dup=0;
   for(const x of pending.raw){
     const t={id:uid('t'),date:x.date,desc:x.desc,ref:x.ref,amount:pending.flip?-x.amount:x.amount,bank:x.bank||pending.bank};
     const base=[t.bank,t.date,t.amount.toFixed(2),keyOf(t.desc)].join('|');
     seen[base]=(seen[base]||0)+1; t.hash=base+'#'+seen[base];
-    if(have.has(t.hash)){ dup++; continue; }
+    if(byHash.has(t.hash)){ dup++; const old=byHash.get(t.hash); if(x.fcat && x.fcat!=='none' && old.category!==x.fcat) fixes.push([old,x.fcat]); continue; }
     t.category=x.fcat||autoCat(t,x.rowType); t.fromFile=!!x.fcat; fresh.push(t);
   }
-  return {fresh,dup};
+  return {fresh,dup,fixes};
 }
 function previewSheet(){
-  const {fresh,dup}=buildPending();
+  const {fresh,dup,fixes}=buildPending();
   const dates=pending.raw.map(t=>t.date).sort();
   const none=fresh.filter(t=>t.category==='none').length, tr=fresh.filter(t=>t.category==='transfer').length;
   const st=stats(fresh);
@@ -876,21 +876,24 @@ function previewSheet(){
     ${BANK[pending.bank].card||pending.flip?`<label class="check"><input type="checkbox" ${pending.flip?'checked':''} onchange="pending.flip=this.checked;previewSheet()"> Purchases show as money in? Flip them</label>`:''}
     <div class="prev">${fresh.slice(0,8).map(t=>{const c=CAT[t.category];return `<div class="tx"><span class="dot" style="background:${c.c}33;width:36px;height:36px;font-size:16px">${c.e}</span><span class="grow"><div class="d small">${esc(t.desc)}</div><div class="s">${fmtDate(t.date)} · ${esc(c.name)}</div></span><span class="amt small num ${t.amount>0?'in':''}">${t.amount>0?'+':'−'}${money(t.amount)}</span></div>`}).join('')}
       ${fresh.length>8?`<p class="tiny muted">…and ${fresh.length-8} more</p>`:''}</div>
-    ${fresh.length?`<button class="btn block pink" onclick="commitImport()">Add ${fresh.length} transaction${fresh.length>1?'s':''}</button>`:`<p class="small">Nothing new in this file. It's all already in the app.</p>`}
+    ${fixes.length?`<div class="warnbox">This file will also put <b>${fixes.length}</b> transaction${fixes.length>1?'s':''} back into the categories saved in the file.</div>`:''}
+    ${fresh.length||fixes.length?`<button class="btn block pink" onclick="commitImport()">${fresh.length?`Add ${fresh.length} transaction${fresh.length>1?'s':''}`:''}${fresh.length&&fixes.length?' and ':''}${fixes.length?`${fresh.length?'f':'F'}ix ${fixes.length}`:''}</button>`:`<p class="small">Nothing new in this file. It's all already in the app.</p>`}
     <button class="btn block ghost" onclick="closeSheet()">Cancel</button>`);
 }
 function commitImport(){
-  const {fresh}=buildPending();
+  const {fresh,fixes}=buildPending();
+  fixes.forEach(([t,c])=>{ t.category=c; });
   // learn from an already-sorted file: most common category per shop
   const votes={};
   fresh.filter(t=>t.fromFile && !['none','goals'].includes(t.category)).forEach(t=>{ const k=ruleKey(t); (votes[k]=votes[k]||{})[t.category]=(votes[k][t.category]||0)+1; });
-  Object.entries(votes).forEach(([k,v])=>{ if(!S.rules[k]) S.rules[k]=Object.entries(v).sort((a,b)=>b[1]-a[1])[0][0]; });
+  fixes.forEach(([t,c])=>{ if(!['none','goals'].includes(c)){ const k=ruleKey(t); (votes[k]=votes[k]||{})[c]=(votes[k][c]||0)+1; } });
+  Object.entries(votes).forEach(([k,v])=>{ if(!S.rules[k] || fixes.length) S.rules[k]=Object.entries(v).sort((a,b)=>b[1]-a[1])[0][0]; });
   fresh.forEach(t=>delete t.fromFile);
   S.tx.push(...fresh); S.tx.sort((a,b)=>b.date.localeCompare(a.date)); save();
   const none=fresh.filter(t=>t.category==='none').length;
-  viewMonth=fresh.map(t=>t.date).sort().pop().slice(0,7); pending=null;
+  if(fresh.length) viewMonth=fresh.map(t=>t.date).sort().pop().slice(0,7); pending=null;
   if(none){ go('settings'); } else go('home');
-  toast(`Added ${fresh.length}${none?` · ${none} need a category`:''}`);
+  toast(`${fresh.length?`Added ${fresh.length}`:''}${fixes.length?`${fresh.length?' · ':''}Fixed ${fixes.length}`:''}${none?` · ${none} need a category`:''}`);
 }
 
 /* ============ Start ============ */
